@@ -10,9 +10,10 @@ import (
 )
 
 func GetFlags() (*internal_flag.Flags, error) {
+	port := flag.Int("port", 5000, "Port number to listen")
 	project := flag.String("project", "", "Google Cloud Project ID")
-	location := flag.String("location", "", "")
-	period := flag.String("sync-period", "", "")
+	location := flag.String("location", "", "Google Cloud Run Location")
+	period := flag.String("sync-period", "", "Period to sync Services from Google Cloud Run")
 
 	flag.Parse()
 
@@ -34,6 +35,7 @@ func GetFlags() (*internal_flag.Flags, error) {
 	}
 
 	return &internal_flag.Flags{
+		Port:       *port,
 		Project:    *project,
 		Location:   *location,
 		SyncPeriod: duration,

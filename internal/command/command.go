@@ -10,6 +10,7 @@ import (
 
 	"github.com/kauche/cloud-run-service-router-xds/internal/driver/db/cloudrun"
 	"github.com/kauche/cloud-run-service-router-xds/internal/driver/distributor/xds"
+	"github.com/kauche/cloud-run-service-router-xds/internal/driver/env/envconfig"
 	"github.com/kauche/cloud-run-service-router-xds/internal/driver/event/broker/gopubsub"
 	"github.com/kauche/cloud-run-service-router-xds/internal/driver/event/subscriber"
 	"github.com/kauche/cloud-run-service-router-xds/internal/driver/flag/flag"
@@ -24,6 +25,7 @@ const (
 	exitCodeFailedToCreateCloudRunClient            = 101
 	exitCodeFailedToSubscribeServicesRefreshedEvent = 102
 	exitCodeFailedToGetFlags                        = 103
+	exitCodeFailedToGetEnvironments                 = 104
 	exitCodeServerAborted                           = 200
 )
 
@@ -43,6 +45,12 @@ func server(ctx context.Context) int {
 	}
 
 	commandLogger := logger.WithName("command")
+
+	env, err := envconfig.GetEnvironments()
+	if err != nil {
+		commandLogger.Error(err, "failed to get environments")
+		return exitCodeFailedToGetEnvironments
+	}
 
 	sc := xds.NewSnapshotCache(logger.WithName("snapshot_cache"))
 
@@ -68,7 +76,7 @@ func server(ctx context.Context) int {
 
 	st := ticker.NewServiceRefreshTicker(uc, flags.SyncPeriod, logger.WithName("service_refresh_ticker"))
 
-	gs := grpc.NewServer(ctx, uc, sc, flags.Port, logger.WithName("grpc_server"))
+	gs := grpc.NewServer(ctx, uc, sc, env.Port, logger.WithName("grpc_server"))
 
 	if err := sb.SubscribeServicesRefreshedEvent(ctx, ss.ServicesRefreshedEventHandler); err != nil {
 		commandLogger.Error(err, "failed to subscribe the service refreshed event")

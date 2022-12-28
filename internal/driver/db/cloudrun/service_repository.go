@@ -17,6 +17,8 @@ import (
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/repository"
 )
 
+const originServiceAnnotation = "kauche.com/cloud-run-service-router-origin-service"
+
 var _ repository.ServiceRepository = (*ServiceRepository)(nil)
 
 type ServiceRepository struct {
@@ -55,13 +57,16 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 	s.servicesMu.Lock()
 	defer s.servicesMu.Unlock()
 
+	// NOTE: since the paging is done by the client internally, we don't need to set PageSize and PageToken.
 	req := &runpb.ListServicesRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/%s", s.project, s.location),
+		Parent:      fmt.Sprintf("projects/%s/locations/%s", s.project, s.location),
+		ShowDeleted: false,
 	}
 	iter := s.client.ListServices(ctx, req)
 
 	servicesMap := make(map[string]*entity.Service)
-
+	serviceNameToOriginServiceMap := make(map[string]*entity.Service)
+	serviceNameToRouteServiceMap := make(map[string]map[string]*entity.Route)
 	for {
 		service, err := iter.Next()
 		if err == iterator.Done {
@@ -76,42 +81,49 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 			return fmt.Errorf("failed to parse service uri: %w", err)
 		}
 
-		svc := &entity.Service{
-			Name:        filepath.Base(service.Name),
-			DefaultHost: uri.Host,
-			Routes:      make(map[string]*entity.Route),
-		}
+		serviceName := filepath.Base(service.Name)
 
-		for _, status := range service.TrafficStatuses {
-			if status.Tag == "" {
-				continue
-			}
-
-			uri, err := url.Parse(status.Uri)
-			if err != nil {
-				return fmt.Errorf("failed to parse service uri for a tagged service: %w", err)
-			}
-
+		originServiceName, ok := service.Annotations[originServiceAnnotation]
+		if ok {
 			route := &entity.Route{
-				Name: status.Tag,
+				Name: serviceName,
 				Host: uri.Host,
 			}
-
-			svc.Routes[route.Name] = route
+			_, ok := serviceNameToRouteServiceMap[originServiceName]
+			if ok {
+				serviceNameToRouteServiceMap[originServiceName][route.Name] = route
+			} else {
+				serviceNameToRouteServiceMap[originServiceName] = map[string]*entity.Route{
+					route.Name: route,
+				}
+			}
+		} else {
+			serviceNameToOriginServiceMap[serviceName] = &entity.Service{
+				Name:        serviceName,
+				DefaultHost: uri.Host,
+			}
 		}
 
-		oldSvc, ok := s.servicesMu.services[svc.Name]
-		if ok && svc.Equal(oldSvc) {
-			svc.Version = oldSvc.Version
+	}
+
+	for name, originService := range serviceNameToOriginServiceMap {
+		routes, ok := serviceNameToRouteServiceMap[name]
+		if ok {
+			originService.Routes = routes
+		}
+
+		oldSvc, ok := s.servicesMu.services[originService.Name]
+		if ok && originService.Equal(oldSvc) {
+			originService.Version = oldSvc.Version
 		} else {
 			version, err := uuid.NewRandom()
 			if err != nil {
 				return fmt.Errorf("failed to create a version for the snapshot cache: %w", err)
 			}
-			svc.Version = version.String()
+			originService.Version = version.String()
 		}
 
-		servicesMap[svc.Name] = svc
+		servicesMap[originService.Name] = originService
 	}
 
 	s.servicesMu.services = servicesMap

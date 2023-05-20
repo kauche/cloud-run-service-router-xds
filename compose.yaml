@@ -1,0 +1,29 @@
+---
+services:
+
+  cloud-run-service-router-xds:
+    image: golang:1.20.4-bullseye
+    ports:
+      - ${PORT-11000}:10000
+    volumes:
+      - .:/go/src/github.com/kauche/cloud-run-service-router-xds:cached
+      - go-pkg-mod:/go/pkg/mod:cached
+      - ${GOCACHE:-~/.cache/go-build}:/tmp/go-build
+    working_dir: /go/src/github.com/kauche/cloud-run-service-router-xds
+    command: go run . --sync-period 5s --project test-project --location asia-northeast1
+    environment:
+      PORT: 10000
+      CLOUD_RUN_EMULATOR_HOST: cloud-run-emulator:8000
+      GOCACHE: /tmp/go-build
+
+  cloud-run-emulator:
+    image: ghcr.io/kauche/cloud-run-api-emulator:0.0.2
+    volumes:
+      - .:/go/src/github.com/kauche/cloud-run-service-router-xds:cached
+    working_dir: /go/src/github.com/kauche/cloud-run-service-router-xds
+    command: cloud-run-api-emulator --seed ./seed.yaml
+    ports:
+      - 11001:8000
+
+volumes:
+  go-pkg-mod:

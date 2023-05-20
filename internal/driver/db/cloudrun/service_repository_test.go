@@ -8,13 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/entity"
@@ -126,21 +123,10 @@ func TestRefreshServices(t *testing.T) {
 
 	ctx := context.Background()
 
-	client, err := run.NewServicesClient(
-		ctx,
-		option.WithEndpoint(endpoint),
-		option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
-	)
+	repo, err := NewServiceRepository(ctx, "test-project", "test-location", endpoint)
 	if err != nil {
-		t.Errorf("failed to create the cloud run client: %s", err)
+		t.Errorf("failed to create the service repository: %s", err)
 		return
-	}
-
-	repo := &ServiceRepository{
-		client:   client,
-		project:  "test-project",
-		location: "test-location",
 	}
 
 	if err = repo.RefreshServices(ctx); err != nil {

@@ -1,0 +1,30 @@
+services:
+
+  - name: projects/test-project/locations/asia-northeast1/services/origin-service-1
+    uri: https://origin-service-1-test-an.a.run.app
+
+  - name: projects/test-project/locations/asia-northeast1/services/route-service-1
+    uri: https://route-service-1-test-an.a.run.app
+    annotations:
+      kauche.com/cloud-run-service-router-origin-service: origin-service-1
+
+  - name: projects/test-project/locations/asia-northeast1/services/origin-service-without-route
+    uri: https://origin-service-without-route-test-an.a.run.app
+
+  - name: projects/test-project/locations/asia-northeast1/services/route-service-without-origin
+    uri: https://route-service-without-origin-test-an.a.run.app
+    annotations:
+      kauche.com/cloud-run-service-router-origin-service: route-service-without-origin
+
+  - name: projects/test-project/locations/asia-northeast1/services/origin-service-2
+    uri: https://origin-service-2-test-an.a.run.app
+
+  - name: projects/test-project/locations/asia-northeast1/services/route-service-2
+    uri: https://route-service-2-test-an.a.run.app
+    annotations:
+      kauche.com/cloud-run-service-router-origin-service: origin-service-2
+
+  - name: projects/test-project/locations/asia-northeast1/services/route-service-3
+    uri: https://route-service-3-test-an.a.run.app
+    annotations:
+      kauche.com/cloud-run-service-router-origin-service: origin-service-2

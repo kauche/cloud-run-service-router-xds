@@ -12,6 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/entity"
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/repository"
@@ -33,8 +36,19 @@ type ServiceRepository struct {
 	}
 }
 
-func NewServiceRepository(ctx context.Context, project, location string) (*ServiceRepository, error) {
-	client, err := run.NewServicesClient(ctx)
+func NewServiceRepository(ctx context.Context, project, location string, emulatorHost string) (*ServiceRepository, error) {
+	var opts []option.ClientOption
+
+	if emulatorHost != "" {
+		opts = append(
+			opts,
+			option.WithEndpoint(emulatorHost),
+			option.WithoutAuthentication(),
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		)
+	}
+
+	client, err := run.NewServicesClient(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a cloud run client: %w", err)
 	}
@@ -103,7 +117,6 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 				DefaultHost: uri.Host,
 			}
 		}
-
 	}
 
 	for name, originService := range serviceNameToOriginServiceMap {

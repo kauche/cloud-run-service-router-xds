@@ -64,7 +64,7 @@ func server(ctx context.Context) int {
 		return exitCodeFailedToGetFlags
 	}
 
-	sr, err := cloudrun.NewServiceRepository(ctx, flags.Project, flags.Location)
+	sr, err := cloudrun.NewServiceRepository(ctx, flags.Project, flags.Location, env.CloudRunEmulatorHost)
 	if err != nil {
 		commandLogger.Error(err, "failed to create a cloud run client")
 		return exitCodeFailedToCreateCloudRunClient

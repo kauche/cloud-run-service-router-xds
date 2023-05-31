@@ -73,17 +73,19 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		return errors.New("the client is not registered")
 	}
 
+	shouldDistributeAllServices := len(clientRequestedServices) == 0
+
 	var listeners []types.Resource
 	var clusters []types.Resource
-	shouldUpdateResourceVersion := false
+	shouldUpdateResourceVersion := len(services) == 0
 
 	for _, service := range services {
 		requestedListenerVersion, ok := clientRequestedServices[service.Name]
-		if !ok {
+		if !ok && !shouldDistributeAllServices {
 			continue
 		}
 
-		if requestedListenerVersion != service.Version {
+		if !shouldDistributeAllServices && (requestedListenerVersion != service.Version) {
 			shouldUpdateResourceVersion = true
 
 			d.clientsMu.RUnlock()
@@ -91,6 +93,10 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 			clientRequestedServices[service.Name] = service.Version
 			d.clientsMu.Unlock()
 			d.clientsMu.RLock()
+		}
+
+		if shouldDistributeAllServices {
+			shouldUpdateResourceVersion = true
 		}
 
 		routes := make([]*route.Route, len(service.Routes)+1)
@@ -275,11 +281,6 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		listeners = append(listeners, lis)
 	}
 
-	resources := map[resource.Type][]types.Resource{
-		resource.ListenerType: listeners,
-		resource.ClusterType:  clusters,
-	}
-
 	var version string
 	if shouldUpdateResourceVersion {
 		uid, err := uuid.NewRandom()
@@ -294,6 +295,18 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		}
 
 		version = snapshot.GetVersion(resource.ListenerType)
+	}
+
+	resources := map[resource.Type][]types.Resource{
+		resource.ListenerType: listeners,
+		resource.ClusterType:  clusters,
+	}
+
+	if len(listeners) != 0 {
+		resources = map[resource.Type][]types.Resource{
+			resource.ListenerType: listeners,
+			resource.ClusterType:  clusters,
+		}
 	}
 
 	sc, err := cache.NewSnapshot(version, resources)
@@ -313,7 +326,7 @@ func (d *ServiceDistributor) RegisterClient(ctx context.Context, client string, 
 	defer d.clientsMu.Unlock()
 
 	_, ok := d.clientsMu.clients[client]
-	if !ok {
+	if !ok || len(serviceNames) == 0 {
 		d.clientsMu.clients[client] = make(map[string]string)
 	}
 

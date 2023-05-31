@@ -26,7 +26,7 @@ func NewServiceRefreshTicker(uc *usecase.ServiceUseCase, syncPeriod time.Duratio
 
 func (t *ServiceRefreshTicker) tick(ctx context.Context) error {
 	if err := t.uc.RefreshServices(ctx); err != nil {
-		return fmt.Errorf("failed to refresh services: %s", err)
+		return fmt.Errorf("failed to refresh services: %w", err)
 	}
 
 	return nil

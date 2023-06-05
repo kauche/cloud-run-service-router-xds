@@ -164,6 +164,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		i := 0
 		for _, r := range service.Routes {
 			routes[i] = &route.Route{
+				Name: r.Name,
 				Match: &route.RouteMatch{
 					PathSpecifier: &route.RouteMatch_Prefix{
 						Prefix: "/",
@@ -224,6 +225,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		}
 
 		routes[len(service.Routes)] = &route.Route{
+			Name: service.Name,
 			Match: &route.RouteMatch{
 				PathSpecifier: &route.RouteMatch_Prefix{
 					Prefix: "/",

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -99,7 +101,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 			shouldUpdateResourceVersion = true
 		}
 
-		routes := make([]*route.Route, len(service.Routes)+1)
+		var routes []*route.Route
 		clusters = make([]types.Resource, len(service.Routes)+1)
 
 		utc := &tls.UpstreamTlsContext{
@@ -124,6 +126,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 			ClusterDiscoveryType: &cluster.Cluster_Type{
 				Type: cluster.Cluster_LOGICAL_DNS,
 			},
+			// TODO: Add TransportSocket to route clusters or delete.
 			TransportSocket: &core.TransportSocket{
 				Name: "envoy.transport_sockets.tls",
 				ConfigType: &core.TransportSocket_TypedConfig{
@@ -163,7 +166,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 
 		i := 0
 		for _, r := range service.Routes {
-			routes[i] = &route.Route{
+			routes = append(routes, &route.Route{
 				Name: r.Name,
 				Match: &route.RouteMatch{
 					PathSpecifier: &route.RouteMatch_Prefix{
@@ -186,7 +189,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 						Timeout: &duration.Duration{Seconds: 10}, // TODO: This timeout duration should be configurable.
 					},
 				},
-			}
+			})
 
 			clusters[i+1] = &cluster.Cluster{
 				Name: r.Host,
@@ -224,7 +227,11 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 			i++
 		}
 
-		routes[len(service.Routes)] = &route.Route{
+		sort.SliceStable(routes, func(x, y int) bool {
+			return strings.Compare(routes[x].Name, routes[y].Name) < 0
+		})
+
+		routes = append(routes, &route.Route{
 			Name: service.Name,
 			Match: &route.RouteMatch{
 				PathSpecifier: &route.RouteMatch_Prefix{
@@ -239,7 +246,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 					Timeout: &duration.Duration{Seconds: 10}, // TODO: This timeout duration should be configurable.
 				},
 			},
-		}
+		})
 
 		hc := &hcm.HttpConnectionManager{
 			HttpFilters: []*hcm.HttpFilter{
@@ -302,13 +309,6 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 	resources := map[resource.Type][]types.Resource{
 		resource.ListenerType: listeners,
 		resource.ClusterType:  clusters,
-	}
-
-	if len(listeners) != 0 {
-		resources = map[resource.Type][]types.Resource{
-			resource.ListenerType: listeners,
-			resource.ClusterType:  clusters,
-		}
 	}
 
 	sc, err := cache.NewSnapshot(version, resources)

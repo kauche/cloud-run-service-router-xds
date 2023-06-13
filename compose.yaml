@@ -17,7 +17,7 @@ services:
       GOCACHE: /tmp/go-build
 
   cloud-run-emulator:
-    image: ghcr.io/kauche/cloud-run-api-emulator:0.0.2
+    image: ghcr.io/kauche/cloud-run-api-emulator:0.0.3
     volumes:
       - .:/go/src/github.com/kauche/cloud-run-service-router-xds:cached
     working_dir: /go/src/github.com/kauche/cloud-run-service-router-xds

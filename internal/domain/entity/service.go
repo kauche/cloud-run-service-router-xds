@@ -1,10 +1,10 @@
 package entity
 
 type Service struct {
-	Name        string
-	DefaultHost string
-	Version     string
-	Routes      map[string]*Route
+	Name         string
+	Version      string
+	DefaultRoute *Route
+	Routes       map[string]*Route
 }
 
 // Equal returns true if two routes have same fields (including Routes) with same values except Version.
@@ -17,7 +17,11 @@ func (s *Service) Equal(other *Service) bool {
 		return false
 	}
 
-	if s.DefaultHost != other.DefaultHost {
+	if s.Version != other.Version {
+		return false
+	}
+
+	if !s.DefaultRoute.Equal(other.DefaultRoute) {
 		return false
 	}
 

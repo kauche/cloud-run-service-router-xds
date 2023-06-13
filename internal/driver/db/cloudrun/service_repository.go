@@ -2,14 +2,17 @@ package cloudrun
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/url"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -100,8 +103,9 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 		originServiceName, ok := service.Annotations[originServiceAnnotation]
 		if ok {
 			route := &entity.Route{
-				Name: serviceName,
-				Host: uri.Host,
+				Name:    serviceName,
+				Version: fmt.Sprintf("%s-%d", service.Uid, service.Generation),
+				Host:    uri.Host,
 			}
 			_, ok := serviceNameToRouteServiceMap[originServiceName]
 			if ok {
@@ -113,8 +117,12 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 			}
 		} else {
 			serviceNameToOriginServiceMap[serviceName] = &entity.Service{
-				Name:        serviceName,
-				DefaultHost: uri.Host,
+				Name: serviceName,
+				DefaultRoute: &entity.Route{
+					Name:    serviceName,
+					Host:    uri.Host,
+					Version: fmt.Sprintf("%s-%d", service.Uid, service.Generation),
+				},
 			}
 		}
 	}
@@ -125,16 +133,30 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 			originService.Routes = routes
 		}
 
-		oldSvc, ok := s.servicesMu.services[originService.Name]
-		if ok && originService.Equal(oldSvc) {
-			originService.Version = oldSvc.Version
-		} else {
-			version, err := uuid.NewRandom()
-			if err != nil {
-				return fmt.Errorf("failed to create a version for the snapshot cache: %w", err)
-			}
-			originService.Version = version.String()
+		rs := make([]*entity.Route, len(routes))
+		i := 0
+		for _, r := range routes {
+			rs[i] = r
+			i++
 		}
+		sort.SliceStable(rs, func(i, j int) bool {
+			return strings.Compare(rs[i].Name, rs[j].Name) < 0
+		})
+
+		hash := sha256.New()
+		_, err := io.WriteString(hash, originService.DefaultRoute.Name)
+		if err != nil {
+			return fmt.Errorf("failed to write a default route name to the service version hash: %w", err)
+		}
+
+		for _, r := range rs {
+			_, err := io.WriteString(hash, r.Name)
+			if err != nil {
+				return fmt.Errorf("failed to write the route, %s, name to the service version hash: %w", r.Name, err)
+			}
+		}
+
+		originService.Version = fmt.Sprintf("%x", hash.Sum(nil))
 
 		servicesMap[originService.Name] = originService
 	}

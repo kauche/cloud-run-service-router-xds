@@ -1,8 +1,9 @@
 package entity
 
 type Route struct {
-	Name string
-	Host string
+	Name    string
+	Host    string
+	Version string
 }
 
 // Equal returns true if two routes have same fields with same values.
@@ -16,6 +17,10 @@ func (r *Route) Equal(other *Route) bool {
 	}
 
 	if r.Host != other.Host {
+		return false
+	}
+
+	if r.Version != other.Version {
 		return false
 	}
 

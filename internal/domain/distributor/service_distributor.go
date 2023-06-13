@@ -9,5 +9,6 @@ import (
 type ServiceDistributor interface {
 	DistributeServices(ctx context.Context, services []*entity.Service) error
 	DistributeServicesToClient(ctx context.Context, services []*entity.Service, client string) error
+	DistributeClustersToClient(ctx context.Context, services []*entity.Service, client string) error
 	RegisterClient(ctx context.Context, client string, serviceNames []string) error
 }

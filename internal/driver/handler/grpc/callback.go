@@ -54,6 +54,10 @@ func (c *callbacks) OnStreamRequest(streamID int64, req *discovery.DiscoveryRequ
 			return fmt.Errorf("failed to distribute services to the client: %w", err)
 		}
 	case resource.ClusterType:
+		if err := c.uc.DistributeClustersToClient(ctx, node.Id); err != nil {
+			c.logger.Error(err, "failed to distribute services to the client", "streamID", streamID, "node", node.Id)
+			return fmt.Errorf("failed to distribute services to the client: %w", err)
+		}
 	}
 
 	return nil

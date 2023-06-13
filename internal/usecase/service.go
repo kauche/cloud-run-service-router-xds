@@ -49,6 +49,19 @@ func (u *ServiceUseCase) DistributeServicesToClient(ctx context.Context, client 
 	return nil
 }
 
+func (u *ServiceUseCase) DistributeClustersToClient(ctx context.Context, client string) error {
+	services, err := u.repository.ListAllServices(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list services: %w", err)
+	}
+
+	if err := u.distributor.DistributeClustersToClient(ctx, services, client); err != nil {
+		return fmt.Errorf("failed to distribute services to the client `%s`: %w", client, err)
+	}
+
+	return nil
+}
+
 func (u *ServiceUseCase) RefreshServices(ctx context.Context) error {
 	if err := u.repository.RefreshServices(ctx); err != nil {
 		return fmt.Errorf("failed to refresh services: %w", err)

@@ -7,14 +7,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
-	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	cache "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -22,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/distributor"
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/entity"
 )
@@ -78,7 +75,6 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 	shouldDistributeAllServices := len(clientRequestedServices) == 0
 
 	var listeners []types.Resource
-	var clusters []types.Resource
 	shouldUpdateResourceVersion := len(services) == 0
 
 	for _, service := range services {
@@ -90,6 +86,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		if !shouldDistributeAllServices && (requestedListenerVersion != service.Version) {
 			shouldUpdateResourceVersion = true
 
+			// TODO: should be defered?
 			d.clientsMu.RUnlock()
 			d.clientsMu.Lock()
 			clientRequestedServices[service.Name] = service.Version
@@ -102,67 +99,6 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		}
 
 		var routes []*route.Route
-		clusters = make([]types.Resource, len(service.Routes)+1)
-
-		utc := &tls.UpstreamTlsContext{
-			CommonTlsContext: &tls.CommonTlsContext{
-				ValidationContextType: &tls.CommonTlsContext_ValidationContext{
-					ValidationContext: &tls.CertificateValidationContext{
-						CaCertificateProviderInstance: &tls.CertificateProviderPluginInstance{
-							InstanceName: "local", // TODO: This instance name should be configurable.
-						},
-					},
-				},
-			},
-		}
-
-		utcb, err := proto.Marshal(utc)
-		if err != nil {
-			return fmt.Errorf("failed to marshal UpstreamTlsContext: %w", err)
-		}
-
-		clusters[0] = &cluster.Cluster{
-			Name: service.DefaultHost,
-			ClusterDiscoveryType: &cluster.Cluster_Type{
-				Type: cluster.Cluster_LOGICAL_DNS,
-			},
-			// TODO: Add TransportSocket to route clusters or delete.
-			TransportSocket: &core.TransportSocket{
-				Name: "envoy.transport_sockets.tls",
-				ConfigType: &core.TransportSocket_TypedConfig{
-					TypedConfig: &anypb.Any{
-						TypeUrl: "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
-						Value:   utcb,
-					},
-				},
-			},
-			LbPolicy: cluster.Cluster_ROUND_ROBIN,
-			LoadAssignment: &endpoint.ClusterLoadAssignment{
-				ClusterName: service.DefaultHost,
-				Endpoints: []*endpoint.LocalityLbEndpoints{
-					{
-						LbEndpoints: []*endpoint.LbEndpoint{
-							{
-								HostIdentifier: &endpoint.LbEndpoint_Endpoint{
-									Endpoint: &endpoint.Endpoint{
-										Address: &core.Address{
-											Address: &core.Address_SocketAddress{
-												SocketAddress: &core.SocketAddress{
-													Address: service.DefaultHost,
-													PortSpecifier: &core.SocketAddress_PortValue{
-														PortValue: 443,
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		}
 
 		i := 0
 		for _, r := range service.Routes {
@@ -191,39 +127,6 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 				},
 			})
 
-			clusters[i+1] = &cluster.Cluster{
-				Name: r.Host,
-				ClusterDiscoveryType: &cluster.Cluster_Type{
-					Type: cluster.Cluster_LOGICAL_DNS,
-				},
-				LbPolicy: cluster.Cluster_ROUND_ROBIN,
-				LoadAssignment: &endpoint.ClusterLoadAssignment{
-					ClusterName: r.Host,
-					Endpoints: []*endpoint.LocalityLbEndpoints{
-						{
-							LbEndpoints: []*endpoint.LbEndpoint{
-								{
-									HostIdentifier: &endpoint.LbEndpoint_Endpoint{
-										Endpoint: &endpoint.Endpoint{
-											Address: &core.Address{
-												Address: &core.Address_SocketAddress{
-													SocketAddress: &core.SocketAddress{
-														Address: r.Host,
-														PortSpecifier: &core.SocketAddress_PortValue{
-															PortValue: 443,
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			}
-
 			i++
 		}
 
@@ -241,7 +144,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 			Action: &route.Route_Route{
 				Route: &route.RouteAction{
 					ClusterSpecifier: &route.RouteAction_Cluster{
-						Cluster: service.DefaultHost,
+						Cluster: service.DefaultRoute.Host,
 					},
 					Timeout: &duration.Duration{Seconds: 10}, // TODO: This timeout duration should be configurable.
 				},
@@ -302,13 +205,145 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		if err != nil {
 			return fmt.Errorf("failed to get the cached snapshot for the client %s: %w", client, err)
 		}
-
 		version = snapshot.GetVersion(resource.ListenerType)
 	}
 
 	resources := map[resource.Type][]types.Resource{
 		resource.ListenerType: listeners,
-		resource.ClusterType:  clusters,
+	}
+
+	sc, err := cache.NewSnapshot(version, resources)
+	if err != nil {
+		return fmt.Errorf("failed to create a new snapshot: %w", err)
+	}
+
+	if err := d.snapshotCache.SetSnapshot(ctx, client, sc); err != nil {
+		return fmt.Errorf("failed to create a snapshot cache to the client `%s`: %w", client, err)
+	}
+
+	return nil
+}
+
+func (d *ServiceDistributor) DistributeClustersToClient(ctx context.Context, services []*entity.Service, client string) error {
+	d.clientsMu.RLock()
+	defer d.clientsMu.RUnlock()
+
+	clientRequestedServices, ok := d.clientsMu.clients[client]
+	if !ok {
+		return errors.New("the client is not registered")
+	}
+
+	shouldDistributeAllServices := len(clientRequestedServices) == 0
+
+	var clusters []types.Resource
+	shouldUpdateResourceVersion := len(services) == 0
+
+	for _, service := range services {
+		requestedListenerVersion, ok := clientRequestedServices[service.Name]
+		if !ok && !shouldDistributeAllServices {
+			continue
+		}
+
+		if !shouldDistributeAllServices && (requestedListenerVersion != service.Version) {
+			shouldUpdateResourceVersion = true
+
+			d.clientsMu.RUnlock()
+			d.clientsMu.Lock()
+			clientRequestedServices[service.Name] = service.Version
+			d.clientsMu.Unlock()
+			d.clientsMu.RLock()
+		}
+
+		if shouldDistributeAllServices {
+			shouldUpdateResourceVersion = true
+		}
+
+		clusters = append(clusters, &cluster.Cluster{
+			Name: service.DefaultRoute.Host,
+			ClusterDiscoveryType: &cluster.Cluster_Type{
+				Type: cluster.Cluster_LOGICAL_DNS,
+			},
+			LbPolicy: cluster.Cluster_ROUND_ROBIN,
+			LoadAssignment: &endpoint.ClusterLoadAssignment{
+				ClusterName: service.DefaultRoute.Host,
+				Endpoints: []*endpoint.LocalityLbEndpoints{
+					{
+						LbEndpoints: []*endpoint.LbEndpoint{
+							{
+								HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+									Endpoint: &endpoint.Endpoint{
+										Address: &core.Address{
+											Address: &core.Address_SocketAddress{
+												SocketAddress: &core.SocketAddress{
+													Address: service.DefaultRoute.Host,
+													PortSpecifier: &core.SocketAddress_PortValue{
+														PortValue: 443,
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+
+		for _, route := range service.Routes {
+			clusters = append(clusters, &cluster.Cluster{
+				Name: route.Host,
+				ClusterDiscoveryType: &cluster.Cluster_Type{
+					Type: cluster.Cluster_LOGICAL_DNS,
+				},
+				LbPolicy: cluster.Cluster_ROUND_ROBIN,
+				LoadAssignment: &endpoint.ClusterLoadAssignment{
+					ClusterName: route.Host,
+					Endpoints: []*endpoint.LocalityLbEndpoints{
+						{
+							LbEndpoints: []*endpoint.LbEndpoint{
+								{
+									HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+										Endpoint: &endpoint.Endpoint{
+											Address: &core.Address{
+												Address: &core.Address_SocketAddress{
+													SocketAddress: &core.SocketAddress{
+														Address: route.Host,
+														PortSpecifier: &core.SocketAddress_PortValue{
+															PortValue: 443,
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		}
+	}
+
+	var version string
+	if shouldUpdateResourceVersion {
+		uid, err := uuid.NewRandom()
+		if err != nil {
+			return fmt.Errorf("failed to create a version for the snapshot cache: %w", err)
+		}
+		version = uid.String()
+	} else {
+		snapshot, err := d.snapshotCache.GetSnapshot(client)
+		if err != nil {
+			return fmt.Errorf("failed to get the cached snapshot for the client %s: %w", client, err)
+		}
+		version = snapshot.GetVersion(resource.ListenerType)
+	}
+
+	resources := map[resource.Type][]types.Resource{
+		resource.ClusterType: clusters,
 	}
 
 	sc, err := cache.NewSnapshot(version, resources)

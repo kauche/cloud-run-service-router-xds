@@ -1,30 +1,44 @@
 services:
 
   - name: projects/test-project/locations/asia-northeast1/services/origin-service-1
+    uid: 7a945ee1-92ea-45dc-b0e6-0acc14447366
+    generation: 1
     uri: https://origin-service-1-test-an.a.run.app
 
   - name: projects/test-project/locations/asia-northeast1/services/route-service-1
+    uid: 8075d5a1-5f93-4d0b-b0f2-a72ce0301c90
+    generation: 1
     uri: https://route-service-1-test-an.a.run.app
     annotations:
       kauche.com/cloud-run-service-router-origin-service: origin-service-1
 
   - name: projects/test-project/locations/asia-northeast1/services/origin-service-without-route
+    uid: 35c3bc74-b4ea-4aab-9fb6-b45471e89b17
+    generation: 1
     uri: https://origin-service-without-route-test-an.a.run.app
 
   - name: projects/test-project/locations/asia-northeast1/services/route-service-without-origin
+    uid: 0d340afa-e947-4361-b233-132248b4d688
+    generation: 1
     uri: https://route-service-without-origin-test-an.a.run.app
     annotations:
       kauche.com/cloud-run-service-router-origin-service: route-service-without-origin
 
   - name: projects/test-project/locations/asia-northeast1/services/origin-service-2
+    uid: 36e40b46-6220-4f60-8198-879db25afe84
+    generation: 1
     uri: https://origin-service-2-test-an.a.run.app
 
   - name: projects/test-project/locations/asia-northeast1/services/route-service-2
+    uid: 6b60c4c1-5dae-4686-8cad-b2f13de07685
+    generation: 1
     uri: https://route-service-2-test-an.a.run.app
     annotations:
       kauche.com/cloud-run-service-router-origin-service: origin-service-2
 
   - name: projects/test-project/locations/asia-northeast1/services/route-service-3
+    uid: e776d948-2d94-4e55-a09d-fe7bf84901e5
+    generation: 1
     uri: https://route-service-3-test-an.a.run.app
     annotations:
       kauche.com/cloud-run-service-router-origin-service: origin-service-2

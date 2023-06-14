@@ -36,13 +36,26 @@ func (u *ServiceUseCase) DistributeServices(ctx context.Context) error {
 	return nil
 }
 
-func (u *ServiceUseCase) DistributeServicesToClient(ctx context.Context, client string) error {
+func (u *ServiceUseCase) DistributeServicesToClient(ctx context.Context, client string, resources []string) error {
 	services, err := u.repository.ListAllServices(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list services: %w", err)
 	}
 
-	if err := u.distributor.DistributeServicesToClient(ctx, services, client); err != nil {
+	if err := u.distributor.DistributeServicesToClient(ctx, services, client, resources); err != nil {
+		return fmt.Errorf("failed to distribute services to the client `%s`: %w", client, err)
+	}
+
+	return nil
+}
+
+func (u *ServiceUseCase) DistributeClustersToClient(ctx context.Context, client string, resources []string) error {
+	services, err := u.repository.ListAllServices(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list services: %w", err)
+	}
+
+	if err := u.distributor.DistributeClustersToClient(ctx, services, client, resources); err != nil {
 		return fmt.Errorf("failed to distribute services to the client `%s`: %w", client, err)
 	}
 
@@ -64,6 +77,14 @@ func (u *ServiceUseCase) RefreshServices(ctx context.Context) error {
 func (u *ServiceUseCase) RegisterClientToDistributor(ctx context.Context, client string, serviceNames []string) error {
 	if err := u.distributor.RegisterClient(ctx, client, serviceNames); err != nil {
 		return fmt.Errorf("failed to add client to the distributor: %w", err)
+	}
+
+	return nil
+}
+
+func (u *ServiceUseCase) RegisterClustersToDistributor(ctx context.Context, client string, serviceNames []string) error {
+	if err := u.distributor.RegisterClustersToClient(ctx, client, serviceNames); err != nil {
+		return fmt.Errorf("failed to register requested clusters to the distributor: %w", err)
 	}
 
 	return nil

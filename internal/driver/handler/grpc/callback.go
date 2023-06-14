@@ -33,35 +33,43 @@ func (c *callbacks) OnStreamClosed(streamID int64, node *core.Node) {
 }
 
 func (c *callbacks) OnStreamRequest(streamID int64, req *discovery.DiscoveryRequest) error {
-	c.logger.Info("stream request", "streamID", streamID, "request", req)
+	c.logger.Info("stream request", "type", req.TypeUrl, "streamID", streamID, "request", req.ResourceNames, "version", req.VersionInfo)
 
 	node := req.GetNode()
 	if node == nil {
 		return errors.New("node does not exist on the request")
 	}
 
-	// NOTE: Register the client (node) to the distributor and make distributor distribute resources to the client only when the request is a LDS request.
-	if req.TypeUrl != resource.ListenerType {
-		return nil
-	}
-
 	ctx := context.Background()
 
-	if err := c.uc.RegisterClientToDistributor(ctx, node.Id, req.ResourceNames); err != nil {
-		c.logger.Error(err, "failed to register the client to distributor", "streamID", streamID, "node", node.Id)
-		return fmt.Errorf("failed to register the client to the distributor: %w", err)
-	}
+	switch req.TypeUrl {
+	case resource.ListenerType:
+		if err := c.uc.RegisterClientToDistributor(ctx, node.Id, req.ResourceNames); err != nil {
+			c.logger.Error(err, "failed to register the client to distributor", "streamID", streamID, "node", node.Id)
+			return fmt.Errorf("failed to register the client to the distributor: %w", err)
+		}
 
-	if err := c.uc.DistributeServicesToClient(ctx, node.Id); err != nil {
-		c.logger.Error(err, "failed to distribute services to the client", "streamID", streamID, "node", node.Id)
-		return fmt.Errorf("failed to distribute services to the client: %w", err)
+		if err := c.uc.DistributeServicesToClient(ctx, node.Id, req.ResourceNames); err != nil {
+			c.logger.Error(err, "failed to distribute services to the client", "streamID", streamID, "node", node.Id)
+			return fmt.Errorf("failed to distribute services to the client: %w", err)
+		}
+	case resource.ClusterType:
+		if err := c.uc.RegisterClustersToDistributor(ctx, node.Id, req.ResourceNames); err != nil {
+			c.logger.Error(err, "failed to register the clusters to distributor", "streamID", streamID, "node", node.Id)
+			return fmt.Errorf("failed to register the clusters to the distributor: %w", err)
+		}
+
+		if err := c.uc.DistributeClustersToClient(ctx, node.Id, req.ResourceNames); err != nil {
+			c.logger.Error(err, "failed to distribute clusters to the client", "streamID", streamID, "node", node.Id)
+			return fmt.Errorf("failed to distribute clusters to the client: %w", err)
+		}
 	}
 
 	return nil
 }
 
-func (c *callbacks) OnStreamResponse(_ context.Context, streamID int64, req *discovery.DiscoveryRequest, _ *discovery.DiscoveryResponse) {
-	c.logger.Info("stream response", "streamID", streamID, "request", req)
+func (c *callbacks) OnStreamResponse(_ context.Context, streamID int64, req *discovery.DiscoveryRequest, res *discovery.DiscoveryResponse) {
+	c.logger.Info("stream response", "streamID", streamID, "request", req, "response", res)
 }
 
 func (c callbacks) OnFetchRequest(_ context.Context, req *discovery.DiscoveryRequest) error {

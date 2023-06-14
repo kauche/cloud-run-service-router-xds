@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -357,6 +358,149 @@ func TestE2E_ListAllResources(t *testing.T) {
 	}
 
 	if diff := cmp.Diff(cgot, cwant, protocmp.Transform(), cmpoptSortClusters); diff != "" {
+		t.Errorf("\n(-got, +want)\n%s", diff)
+		return
+	}
+}
+
+func TestE2E_ListMultipleClusters(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	strem, err := client.StreamAggregatedResources(ctx)
+	if err != nil {
+		t.Errorf("failed to create a stream: %s", err)
+		return
+	}
+
+	if err = strem.Send(&discovery.DiscoveryRequest{
+		TypeUrl: "type.googleapis.com/envoy.config.listener.v3.Listener",
+		Node: &core.Node{
+			Id: "test-4",
+		},
+		ResourceNames: []string{"origin-service-1", "origin-service-2"},
+	}); err != nil {
+		t.Errorf("failed to send a request: %s", err)
+		return
+	}
+
+	lres, err := strem.Recv()
+	if err != nil {
+		t.Errorf("failed to receive a response: %s", err)
+		return
+	}
+
+	lgot := make([]*listener.Listener, len(lres.Resources))
+	unmarshalOptions := proto.UnmarshalOptions{}
+	for i, resource := range lres.Resources {
+		lgot[i] = new(listener.Listener)
+		if err = anypb.UnmarshalTo(resource, lgot[i], unmarshalOptions); err != nil {
+			t.Errorf("failed to unmarshal xds response: %s", err)
+			return
+		}
+	}
+
+	l1, err := newListener(t, "origin-service-1", []string{"route-service-1"})
+	if err != nil {
+		t.Errorf("failed to create a listener: %s", err)
+		return
+	}
+
+	l2, err := newListener(t, "origin-service-2", []string{"route-service-2", "route-service-3"})
+	if err != nil {
+		t.Errorf("failed to create a listener: %s", err)
+		return
+	}
+
+	lwant := []*listener.Listener{
+		l1,
+		l2,
+	}
+
+	if diff := cmp.Diff(lgot, lwant, protocmp.Transform(), cmpoptSortListeners); diff != "" {
+		t.Errorf("\n(-got, +want)\n%s", diff)
+		return
+	}
+
+	if err = strem.Send(&discovery.DiscoveryRequest{
+		TypeUrl: "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+		Node: &core.Node{
+			Id: "test-4",
+		},
+		ResourceNames: []string{
+			"origin-service-1-test-an.a.run.app",
+			"route-service-1-test-an.a.run.app",
+		},
+	}); err != nil {
+		t.Errorf("failed to send a request: %s", err)
+		return
+	}
+
+	cres, err := strem.Recv()
+	if err != nil {
+		t.Errorf("failed to receive a response: %s", err)
+		return
+	}
+
+	cgot1 := make([]*cluster.Cluster, len(cres.Resources))
+	for i, resource := range cres.Resources {
+		cgot1[i] = new(cluster.Cluster)
+		if err = anypb.UnmarshalTo(resource, cgot1[i], unmarshalOptions); err != nil {
+			t.Errorf("failed to unmarshal xds response: %s", err)
+			return
+		}
+	}
+
+	cwant1 := []*cluster.Cluster{
+		newCluster(t, "origin-service-1-test-an.a.run.app"),
+		newCluster(t, "route-service-1-test-an.a.run.app"),
+	}
+
+	if diff := cmp.Diff(cgot1, cwant1, protocmp.Transform(), cmpoptSortClusters); diff != "" {
+		t.Errorf("\n(-got, +want)\n%s", diff)
+		return
+	}
+
+	if err = strem.Send(&discovery.DiscoveryRequest{
+		TypeUrl: "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+		Node: &core.Node{
+			Id: "test-4",
+		},
+		VersionInfo:   cres.VersionInfo,
+		ResponseNonce: cres.Nonce,
+		ResourceNames: []string{
+			"origin-service-2-test-an.a.run.app",
+			"route-service-2-test-an.a.run.app",
+			"route-service-3-test-an.a.run.app",
+		},
+	}); err != nil {
+		t.Errorf("failed to send a request: %s", err)
+		return
+	}
+
+	cres2, err := strem.Recv()
+	if err != nil {
+		t.Errorf("failed to receive a response: %s", err)
+		return
+	}
+
+	cgot2 := make([]*cluster.Cluster, len(cres2.Resources))
+	for i, resource := range cres2.Resources {
+		cgot2[i] = new(cluster.Cluster)
+		if err = anypb.UnmarshalTo(resource, cgot2[i], unmarshalOptions); err != nil {
+			t.Errorf("failed to unmarshal xds response: %s", err)
+			return
+		}
+	}
+
+	cwant2 := []*cluster.Cluster{
+		newCluster(t, "origin-service-2-test-an.a.run.app"),
+		newCluster(t, "route-service-2-test-an.a.run.app"),
+		newCluster(t, "route-service-3-test-an.a.run.app"),
+	}
+
+	if diff := cmp.Diff(cgot2, cwant2, protocmp.Transform(), cmpoptSortClusters); diff != "" {
 		t.Errorf("\n(-got, +want)\n%s", diff)
 		return
 	}

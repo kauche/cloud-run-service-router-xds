@@ -2,11 +2,13 @@ package xds
 
 import (
 	"context"
-	"errors"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
+
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
@@ -17,9 +19,9 @@ import (
 	cache "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	duration "github.com/golang/protobuf/ptypes/duration"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/distributor"
 	"github.com/kauche/cloud-run-service-router-xds/internal/domain/entity"
 )
@@ -29,10 +31,14 @@ var _ distributor.ServiceDistributor = (*ServiceDistributor)(nil)
 type ServiceDistributor struct {
 	snapshotCache cache.SnapshotCache
 
-	clientsMu struct {
+	clientListenersMu struct {
 		sync.RWMutex
-		// [client] -> [service name] -> [version]
-		clients map[string]map[string]string
+		clientRequestedListeners map[string][]string
+	}
+
+	clientClustersMu struct {
+		sync.RWMutex
+		clientRequestedClusters map[string][]string
 	}
 }
 
@@ -41,61 +47,132 @@ func NewServiceDistributor(sc cache.SnapshotCache) *ServiceDistributor {
 		snapshotCache: sc,
 	}
 
-	d.clientsMu.clients = make(map[string]map[string]string)
+	d.clientListenersMu.clientRequestedListeners = make(map[string][]string)
+	d.clientClustersMu.clientRequestedClusters = make(map[string][]string)
 
 	return d
 }
 
 func (d *ServiceDistributor) DistributeServices(ctx context.Context, services []*entity.Service) error {
-	d.clientsMu.RLock()
-	clients := make([]string, 0, len(d.clientsMu.clients))
-	for k := range d.clientsMu.clients {
-		clients = append(clients, k)
+	d.clientListenersMu.RLock()
+	defer d.clientListenersMu.RUnlock()
+	for client, resourceNames := range d.clientListenersMu.clientRequestedListeners {
+		// TODO: should call concurrently
+		if err := d.DistributeServicesToClient(ctx, services, client, resourceNames); err != nil {
+			return fmt.Errorf("failed to distribute Listenres to the client:%q : %w", client, err)
+		}
 	}
-	d.clientsMu.RUnlock()
 
-	for _, client := range clients {
-		if err := d.DistributeServicesToClient(ctx, services, client); err != nil {
-			return fmt.Errorf("failed to distribute services to the client %s: %w", client, err)
+	d.clientClustersMu.RLock()
+	defer d.clientClustersMu.RUnlock()
+	for client, resourceNames := range d.clientClustersMu.clientRequestedClusters {
+		// TODO: should call concurrently
+		if err := d.DistributeClustersToClient(ctx, services, client, resourceNames); err != nil {
+			return fmt.Errorf("failed to distribute Clusters to the client:%q : %w", client, err)
 		}
 	}
 
 	return nil
 }
 
-func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, services []*entity.Service, client string) error {
-	d.clientsMu.RLock()
-	defer d.clientsMu.RUnlock()
-
-	clientRequestedServices, ok := d.clientsMu.clients[client]
-	if !ok {
-		return errors.New("the client is not registered")
+func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, services []*entity.Service, client string, resouceNames []string) error {
+	listeners, version, err := generateListeners(services, resouceNames)
+	if err != nil {
+		return fmt.Errorf("failed to generate Listeners: %w", err)
 	}
 
-	shouldDistributeAllServices := len(clientRequestedServices) == 0
+	out := &cache.Snapshot{}
+
+	osc, err := d.snapshotCache.GetSnapshot(client)
+	if err == nil {
+		cv := osc.GetVersion(resource.ClusterType)
+
+		var clusters []types.Resource
+		for _, v := range osc.GetResources(resource.ClusterType) {
+			clusters = append(clusters, v)
+		}
+
+		out.Resources[cache.GetResponseType(resource.ClusterType)] = cache.NewResources(cv, clusters)
+	}
+
+	out.Resources[cache.GetResponseType(resource.ListenerType)] = cache.NewResources(version, listeners)
+
+	if err := d.snapshotCache.SetSnapshot(ctx, client, out); err != nil {
+		return fmt.Errorf("failed to create a snapshot cache to the client `%s`: %w", client, err)
+	}
+
+	return nil
+}
+
+func (d *ServiceDistributor) DistributeClustersToClient(ctx context.Context, services []*entity.Service, client string, resourceNames []string) error {
+	clusters, version, err := generateClusters(services, resourceNames)
+	if err != nil {
+		return fmt.Errorf("failed to generate Clusters: %w", err)
+	}
+
+	out := &cache.Snapshot{}
+
+	osc, err := d.snapshotCache.GetSnapshot(client)
+	if err == nil {
+		lv := osc.GetVersion(resource.ListenerType)
+
+		var listeners []types.Resource
+		for _, v := range osc.GetResources(resource.ListenerType) {
+			listeners = append(listeners, v)
+		}
+
+		out.Resources[cache.GetResponseType(resource.ListenerType)] = cache.NewResources(lv, listeners)
+	}
+
+	out.Resources[cache.GetResponseType(resource.ClusterType)] = cache.NewResources(version, clusters)
+
+	if err := d.snapshotCache.SetSnapshot(ctx, client, out); err != nil {
+		return fmt.Errorf("failed to create a snapshot cache to the client `%s`: %w", client, err)
+	}
+
+	return nil
+}
+
+func (d *ServiceDistributor) RegisterClient(ctx context.Context, client string, serviceNames []string) error {
+	d.clientListenersMu.Lock()
+	d.clientListenersMu.clientRequestedListeners[client] = serviceNames
+	defer d.clientListenersMu.Unlock()
+
+	return nil
+}
+
+func (d *ServiceDistributor) RegisterClustersToClient(ctx context.Context, client string, serviceNames []string) error {
+	d.clientClustersMu.Lock()
+	d.clientClustersMu.clientRequestedClusters[client] = serviceNames
+	defer d.clientClustersMu.Unlock()
+
+	return nil
+}
+
+func generateListeners(services []*entity.Service, requestedNames []string) ([]types.Resource, string, error) {
+	if len(services) == 0 {
+		return []types.Resource{}, "", nil
+	}
 
 	var listeners []types.Resource
-	shouldUpdateResourceVersion := len(services) == 0
+
+	shoudDistributeAll := len(requestedNames) == 0
+
+	names := make(map[string]struct{})
+	for _, name := range requestedNames {
+		names[name] = struct{}{}
+	}
+
+	sort.SliceStable(services, func(i, j int) bool {
+		return strings.Compare(services[i].Name, services[j].Name) < 0
+	})
+
+	versionHash := sha256.New()
 
 	for _, service := range services {
-		requestedListenerVersion, ok := clientRequestedServices[service.Name]
-		if !ok && !shouldDistributeAllServices {
+		_, ok := names[service.Name]
+		if !shoudDistributeAll && !ok {
 			continue
-		}
-
-		if !shouldDistributeAllServices && (requestedListenerVersion != service.Version) {
-			shouldUpdateResourceVersion = true
-
-			// TODO: should be defered?
-			d.clientsMu.RUnlock()
-			d.clientsMu.Lock()
-			clientRequestedServices[service.Name] = service.Version
-			d.clientsMu.Unlock()
-			d.clientsMu.RLock()
-		}
-
-		if shouldDistributeAllServices {
-			shouldUpdateResourceVersion = true
 		}
 
 		var routes []*route.Route
@@ -177,7 +254,7 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 
 		hcb, err := proto.Marshal(hc)
 		if err != nil {
-			return fmt.Errorf("failed to marshal a HttpConnectionManager protobuf: %w", err)
+			return nil, "", fmt.Errorf("failed to marshal a HttpConnectionManager protobuf: %w", err)
 		}
 
 		lis := &listener.Listener{
@@ -191,129 +268,89 @@ func (d *ServiceDistributor) DistributeServicesToClient(ctx context.Context, ser
 		}
 
 		listeners = append(listeners, lis)
-	}
-
-	var version string
-	if shouldUpdateResourceVersion {
-		uid, err := uuid.NewRandom()
+		_, err = io.WriteString(versionHash, lis.Name)
 		if err != nil {
-			return fmt.Errorf("failed to create a version for the snapshot cache: %w", err)
+			return nil, "", fmt.Errorf("failed to write string to version has for listner/%q: %w", lis.Name, err)
 		}
-		version = uid.String()
-	} else {
-		snapshot, err := d.snapshotCache.GetSnapshot(client)
-		if err != nil {
-			return fmt.Errorf("failed to get the cached snapshot for the client %s: %w", client, err)
-		}
-		version = snapshot.GetVersion(resource.ListenerType)
 	}
 
-	resources := map[resource.Type][]types.Resource{
-		resource.ListenerType: listeners,
-	}
-
-	sc, err := cache.NewSnapshot(version, resources)
-	if err != nil {
-		return fmt.Errorf("failed to create a new snapshot: %w", err)
-	}
-
-	if err := d.snapshotCache.SetSnapshot(ctx, client, sc); err != nil {
-		return fmt.Errorf("failed to create a snapshot cache to the client `%s`: %w", client, err)
-	}
-
-	return nil
+	return listeners, fmt.Sprintf("%x", versionHash.Sum(nil)), nil
 }
 
-func (d *ServiceDistributor) DistributeClustersToClient(ctx context.Context, services []*entity.Service, client string) error {
-	d.clientsMu.RLock()
-	defer d.clientsMu.RUnlock()
-
-	clientRequestedServices, ok := d.clientsMu.clients[client]
-	if !ok {
-		return errors.New("the client is not registered")
+func generateClusters(services []*entity.Service, requestedNames []string) ([]types.Resource, string, error) {
+	if len(services) == 0 {
+		return []types.Resource{}, "", nil
 	}
-
-	shouldDistributeAllServices := len(clientRequestedServices) == 0
 
 	var clusters []types.Resource
-	shouldUpdateResourceVersion := len(services) == 0
+
+	shoudDistributeAll := len(requestedNames) == 0
+
+	names := make(map[string]struct{})
+	for _, name := range requestedNames {
+		names[name] = struct{}{}
+	}
+
+	sort.SliceStable(services, func(i, j int) bool {
+		return strings.Compare(services[i].Name, services[j].Name) < 0
+	})
+
+	versionHash := sha256.New()
 
 	for _, service := range services {
-		requestedListenerVersion, ok := clientRequestedServices[service.Name]
-		if !ok && !shouldDistributeAllServices {
-			continue
+		var routes []*entity.Route
+		for _, r := range service.Routes {
+			_, ok := names[r.Host]
+			if !shoudDistributeAll && !ok {
+				continue
+			}
+			routes = append(routes, r)
 		}
 
-		if !shouldDistributeAllServices && (requestedListenerVersion != service.Version) {
-			shouldUpdateResourceVersion = true
-
-			d.clientsMu.RUnlock()
-			d.clientsMu.Lock()
-			clientRequestedServices[service.Name] = service.Version
-			d.clientsMu.Unlock()
-			d.clientsMu.RLock()
+		_, ok := names[service.DefaultRoute.Host]
+		if shoudDistributeAll || ok {
+			routes = append(routes, service.DefaultRoute)
 		}
 
-		if shouldDistributeAllServices {
-			shouldUpdateResourceVersion = true
-		}
-
-		clusters = append(clusters, &cluster.Cluster{
-			Name: service.DefaultRoute.Host,
-			ClusterDiscoveryType: &cluster.Cluster_Type{
-				Type: cluster.Cluster_LOGICAL_DNS,
-			},
-			LbPolicy: cluster.Cluster_ROUND_ROBIN,
-			LoadAssignment: &endpoint.ClusterLoadAssignment{
-				ClusterName: service.DefaultRoute.Host,
-				Endpoints: []*endpoint.LocalityLbEndpoints{
-					{
-						LbEndpoints: []*endpoint.LbEndpoint{
-							{
-								HostIdentifier: &endpoint.LbEndpoint_Endpoint{
-									Endpoint: &endpoint.Endpoint{
-										Address: &core.Address{
-											Address: &core.Address_SocketAddress{
-												SocketAddress: &core.SocketAddress{
-													Address: service.DefaultRoute.Host,
-													PortSpecifier: &core.SocketAddress_PortValue{
-														PortValue: 443,
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
+		sort.SliceStable(routes, func(i, j int) bool {
+			return strings.Compare(routes[i].Name, routes[j].Name) < 0
 		})
 
-		for _, route := range service.Routes {
-			clusters = append(clusters, &cluster.Cluster{
-				Name: route.Host,
-				ClusterDiscoveryType: &cluster.Cluster_Type{
-					Type: cluster.Cluster_LOGICAL_DNS,
-				},
-				LbPolicy: cluster.Cluster_ROUND_ROBIN,
-				LoadAssignment: &endpoint.ClusterLoadAssignment{
-					ClusterName: route.Host,
-					Endpoints: []*endpoint.LocalityLbEndpoints{
+		for _, r := range routes {
+			clu := createCluster(r.Host)
+			clusters = append(clusters, clu)
+
+			_, err := io.WriteString(versionHash, clu.Name)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to write string to version has for cluster/%q: %w", clu.Name, err)
+			}
+		}
+	}
+
+	return clusters, fmt.Sprintf("%x", versionHash.Sum(nil)), nil
+}
+
+func createCluster(host string) *cluster.Cluster {
+	return &cluster.Cluster{
+		Name: host,
+		ClusterDiscoveryType: &cluster.Cluster_Type{
+			Type: cluster.Cluster_LOGICAL_DNS,
+		},
+		LbPolicy: cluster.Cluster_ROUND_ROBIN,
+		LoadAssignment: &endpoint.ClusterLoadAssignment{
+			ClusterName: host,
+			Endpoints: []*endpoint.LocalityLbEndpoints{
+				{
+					LbEndpoints: []*endpoint.LbEndpoint{
 						{
-							LbEndpoints: []*endpoint.LbEndpoint{
-								{
-									HostIdentifier: &endpoint.LbEndpoint_Endpoint{
-										Endpoint: &endpoint.Endpoint{
-											Address: &core.Address{
-												Address: &core.Address_SocketAddress{
-													SocketAddress: &core.SocketAddress{
-														Address: route.Host,
-														PortSpecifier: &core.SocketAddress_PortValue{
-															PortValue: 443,
-														},
-													},
+							HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+								Endpoint: &endpoint.Endpoint{
+									Address: &core.Address{
+										Address: &core.Address_SocketAddress{
+											SocketAddress: &core.SocketAddress{
+												Address: host,
+												PortSpecifier: &core.SocketAddress_PortValue{
+													PortValue: 443,
 												},
 											},
 										},
@@ -323,56 +360,7 @@ func (d *ServiceDistributor) DistributeClustersToClient(ctx context.Context, ser
 						},
 					},
 				},
-			})
-		}
+			},
+		},
 	}
-
-	var version string
-	if shouldUpdateResourceVersion {
-		uid, err := uuid.NewRandom()
-		if err != nil {
-			return fmt.Errorf("failed to create a version for the snapshot cache: %w", err)
-		}
-		version = uid.String()
-	} else {
-		snapshot, err := d.snapshotCache.GetSnapshot(client)
-		if err != nil {
-			return fmt.Errorf("failed to get the cached snapshot for the client %s: %w", client, err)
-		}
-		version = snapshot.GetVersion(resource.ListenerType)
-	}
-
-	resources := map[resource.Type][]types.Resource{
-		resource.ClusterType: clusters,
-	}
-
-	sc, err := cache.NewSnapshot(version, resources)
-	if err != nil {
-		return fmt.Errorf("failed to create a new snapshot: %w", err)
-	}
-
-	if err := d.snapshotCache.SetSnapshot(ctx, client, sc); err != nil {
-		return fmt.Errorf("failed to create a snapshot cache to the client `%s`: %w", client, err)
-	}
-
-	return nil
-}
-
-func (d *ServiceDistributor) RegisterClient(ctx context.Context, client string, serviceNames []string) error {
-	d.clientsMu.Lock()
-	defer d.clientsMu.Unlock()
-
-	_, ok := d.clientsMu.clients[client]
-	if !ok || len(serviceNames) == 0 {
-		d.clientsMu.clients[client] = make(map[string]string)
-	}
-
-	for _, service := range serviceNames {
-		_, ok := d.clientsMu.clients[client][service]
-		if !ok {
-			d.clientsMu.clients[client][service] = ""
-		}
-	}
-
-	return nil
 }

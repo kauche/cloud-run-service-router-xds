@@ -19,6 +19,7 @@ import (
 	cache "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	duration "github.com/golang/protobuf/ptypes/duration"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -196,6 +197,11 @@ func generateListeners(services []*entity.Service, requestedNames []string) ([]t
 				},
 				Action: &route.Route_Route{
 					Route: &route.RouteAction{
+						HostRewriteSpecifier: &route.RouteAction_AutoHostRewrite{
+							AutoHostRewrite: &wrappers.BoolValue{
+								Value: true,
+							},
+						},
 						ClusterSpecifier: &route.RouteAction_Cluster{
 							Cluster: r.Host,
 						},
@@ -345,6 +351,7 @@ func createCluster(host string) *cluster.Cluster {
 						{
 							HostIdentifier: &endpoint.LbEndpoint_Endpoint{
 								Endpoint: &endpoint.Endpoint{
+									Hostname: host,
 									Address: &core.Address{
 										Address: &core.Address_SocketAddress{
 											SocketAddress: &core.SocketAddress{

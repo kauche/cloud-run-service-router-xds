@@ -15,6 +15,7 @@ import (
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/golang/protobuf/ptypes/duration"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc"
@@ -512,10 +513,10 @@ func newListener(t *testing.T, name string, routes []string) (*listener.Listener
 	rs := make([]*route.Route, len(routes)+1)
 
 	for i, r := range routes {
-		rs[i] = newRoute(t, r, name)
+		rs[i] = newRoute(t, r, name, true)
 	}
 
-	rs[len(routes)] = newRoute(t, name, name)
+	rs[len(routes)] = newRoute(t, name, name, false)
 
 	hc := &hcm.HttpConnectionManager{
 		HttpFilters: []*hcm.HttpFilter{
@@ -557,7 +558,7 @@ func newListener(t *testing.T, name string, routes []string) (*listener.Listener
 	}, nil
 }
 
-func newRoute(t *testing.T, name, originServiceName string) *route.Route {
+func newRoute(t *testing.T, name, originServiceName string, rewriteHost bool) *route.Route {
 	t.Helper()
 
 	var headers []*route.HeaderMatcher
@@ -572,6 +573,23 @@ func newRoute(t *testing.T, name, originServiceName string) *route.Route {
 		}
 	}
 
+	action := &route.Route_Route{
+		Route: &route.RouteAction{
+			ClusterSpecifier: &route.RouteAction_Cluster{
+				Cluster: fmt.Sprintf("%s-test-an.a.run.app", name),
+			},
+			Timeout: &duration.Duration{Seconds: 10},
+		},
+	}
+
+	if rewriteHost {
+		action.Route.HostRewriteSpecifier = &route.RouteAction_AutoHostRewrite{
+			AutoHostRewrite: &wrappers.BoolValue{
+				Value: true,
+			},
+		}
+	}
+
 	return &route.Route{
 		Name: name,
 		Match: &route.RouteMatch{
@@ -580,14 +598,7 @@ func newRoute(t *testing.T, name, originServiceName string) *route.Route {
 			},
 			Headers: headers,
 		},
-		Action: &route.Route_Route{
-			Route: &route.RouteAction{
-				ClusterSpecifier: &route.RouteAction_Cluster{
-					Cluster: fmt.Sprintf("%s-test-an.a.run.app", name),
-				},
-				Timeout: &duration.Duration{Seconds: 10},
-			},
-		},
+		Action: action,
 	}
 }
 
@@ -608,6 +619,7 @@ func newCluster(t *testing.T, name string) *cluster.Cluster {
 						{
 							HostIdentifier: &endpoint.LbEndpoint_Endpoint{
 								Endpoint: &endpoint.Endpoint{
+									Hostname: name,
 									Address: &core.Address{
 										Address: &core.Address_SocketAddress{
 											SocketAddress: &core.SocketAddress{

@@ -2,7 +2,7 @@
 services:
 
   cloud-run-service-router-xds:
-    image: golang:1.20.4-bullseye
+    image: golang:1.25.6-trixie
     ports:
       - ${PORT-11000}:10000
     volumes:

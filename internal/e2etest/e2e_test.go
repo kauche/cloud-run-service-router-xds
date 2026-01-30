@@ -513,10 +513,10 @@ func newListener(t *testing.T, name string, routes []string) (*listener.Listener
 	rs := make([]*route.Route, len(routes)+1)
 
 	for i, r := range routes {
-		rs[i] = newRoute(t, r, name, true)
+		rs[i] = newRoute(t, r, name)
 	}
 
-	rs[len(routes)] = newRoute(t, name, name, false)
+	rs[len(routes)] = newRoute(t, name, name)
 
 	hc := &hcm.HttpConnectionManager{
 		HttpFilters: []*hcm.HttpFilter{
@@ -558,7 +558,7 @@ func newListener(t *testing.T, name string, routes []string) (*listener.Listener
 	}, nil
 }
 
-func newRoute(t *testing.T, name, originServiceName string, rewriteHost bool) *route.Route {
+func newRoute(t *testing.T, name, originServiceName string) *route.Route {
 	t.Helper()
 
 	var headers []*route.HeaderMatcher
@@ -582,12 +582,10 @@ func newRoute(t *testing.T, name, originServiceName string, rewriteHost bool) *r
 		},
 	}
 
-	if rewriteHost {
-		action.Route.HostRewriteSpecifier = &route.RouteAction_AutoHostRewrite{
-			AutoHostRewrite: &wrappers.BoolValue{
-				Value: true,
-			},
-		}
+	action.Route.HostRewriteSpecifier = &route.RouteAction_AutoHostRewrite{
+		AutoHostRewrite: &wrappers.BoolValue{
+			Value: true,
+		},
 	}
 
 	return &route.Route{

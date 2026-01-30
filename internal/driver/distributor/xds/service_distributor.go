@@ -226,6 +226,11 @@ func generateListeners(services []*entity.Service, requestedNames []string) ([]t
 			},
 			Action: &route.Route_Route{
 				Route: &route.RouteAction{
+					HostRewriteSpecifier: &route.RouteAction_AutoHostRewrite{
+						AutoHostRewrite: &wrappers.BoolValue{
+							Value: true,
+						},
+					},
 					ClusterSpecifier: &route.RouteAction_Cluster{
 						Cluster: service.DefaultRoute.Host,
 					},

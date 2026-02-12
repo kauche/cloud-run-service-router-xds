@@ -42,3 +42,15 @@ services:
     uri: https://route-service-3-test-an.a.run.app
     annotations:
       kauche.com/cloud-run-service-router-origin-service: origin-service-2
+
+  - name: projects/test-project/locations/asia-northeast1/services/origin-service-empty-uri
+    uid: aabbccdd-0000-1111-2222-333344445555
+    generation: 1
+    uri: ""
+
+  - name: projects/test-project/locations/asia-northeast1/services/route-service-empty-uri
+    uid: eeff0011-2233-4455-6677-8899aabbccdd
+    generation: 1
+    uri: ""
+    annotations:
+      kauche.com/cloud-run-service-router-origin-service: origin-service-1

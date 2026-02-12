@@ -46,6 +46,19 @@ var (
 			Generation:  1,
 			Annotations: map[string]string{originServiceAnnotation: "route-service-without-origin"},
 		},
+		{
+			Name:       "projects/test-project/locations/test-location/services/origin-service-empty-uri",
+			Uid:        "aabbccdd-0000-1111-2222-333344445555",
+			Uri:        "",
+			Generation: 1,
+		},
+		{
+			Name:        "projects/test-project/locations/test-location/services/route-service-empty-uri",
+			Uid:         "eeff0011-2233-4455-6677-8899aabbccdd",
+			Uri:         "",
+			Generation:  1,
+			Annotations: map[string]string{originServiceAnnotation: "origin-service-1"},
+		},
 	}
 	secondPageServices = []*runpb.Service{
 		{
@@ -77,7 +90,7 @@ type testCloudRunServicesServer struct {
 
 const testNextPageToken = "next-page-token"
 
-func (t *testCloudRunServicesServer) ListServices(ctx context.Context, req *runpb.ListServicesRequest) (*runpb.ListServicesResponse, error) {
+func (t *testCloudRunServicesServer) ListServices(_ context.Context, req *runpb.ListServicesRequest) (*runpb.ListServicesResponse, error) {
 	var res *runpb.ListServicesResponse
 
 	if req.PageToken == "" {

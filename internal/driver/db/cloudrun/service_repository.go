@@ -63,7 +63,7 @@ func NewServiceRepository(ctx context.Context, project, location string, emulato
 	}, nil
 }
 
-func (s *ServiceRepository) ListAllServices(ctx context.Context) ([]*entity.Service, error) {
+func (s *ServiceRepository) ListAllServices(_ context.Context) ([]*entity.Service, error) {
 	s.servicesMu.RLock()
 	defer s.servicesMu.RUnlock()
 
@@ -91,6 +91,11 @@ func (s *ServiceRepository) RefreshServices(ctx context.Context) error {
 		}
 		if err != nil {
 			return fmt.Errorf("failed to iterate services: %w", err)
+		}
+
+		// NOTE: There are services without URI (e.g., services that are failed to be started etc.)
+		if service.Uri == "" {
+			continue
 		}
 
 		uri, err := url.Parse(service.Uri)

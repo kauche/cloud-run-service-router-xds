@@ -9,7 +9,7 @@ import (
 )
 
 func NewSnapshotCache(logger logr.Logger) cache.SnapshotCache {
-	return cache.NewSnapshotCache(true, cache.IDHash{}, &snapshotCacheLogger{logger: logger})
+	return cache.NewSnapshotCache(false, cache.IDHash{}, &snapshotCacheLogger{logger: logger})
 }
 
 var _ log.Logger = (*snapshotCacheLogger)(nil)

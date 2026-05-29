@@ -9,7 +9,7 @@ import (
 )
 
 func NewSnapshotCache(logger logr.Logger) cache.SnapshotCache {
-	return cache.NewSnapshotCache(false, cache.IDHash{}, &snapshotCacheLogger{logger: logger})
+	return cache.NewSnapshotCache(true, cache.IDHash{}, &snapshotCacheLogger{logger: logger})
 }
 
 var _ log.Logger = (*snapshotCacheLogger)(nil)
@@ -18,18 +18,18 @@ type snapshotCacheLogger struct {
 	logger logr.Logger
 }
 
-func (s *snapshotCacheLogger) Debugf(format string, args ...interface{}) {
+func (s *snapshotCacheLogger) Debugf(format string, args ...any) {
 	s.logger.WithValues("level", "DEBUG").Info(fmt.Sprintf(format, args...))
 }
 
-func (s *snapshotCacheLogger) Infof(format string, args ...interface{}) {
+func (s *snapshotCacheLogger) Infof(format string, args ...any) {
 	s.logger.WithValues("level", "INFO").Info(fmt.Sprintf(format, args...))
 }
 
-func (s *snapshotCacheLogger) Warnf(format string, args ...interface{}) {
+func (s *snapshotCacheLogger) Warnf(format string, args ...any) {
 	s.logger.WithValues("level", "WARN").Info(fmt.Sprintf(format, args...))
 }
 
-func (s *snapshotCacheLogger) Errorf(format string, args ...interface{}) {
+func (s *snapshotCacheLogger) Errorf(format string, args ...any) {
 	s.logger.WithValues("level", "ERROR").Info(fmt.Sprintf(format, args...))
 }

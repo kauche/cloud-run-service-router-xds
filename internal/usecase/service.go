@@ -89,3 +89,11 @@ func (u *ServiceUseCase) RegisterClustersToDistributor(ctx context.Context, clie
 
 	return nil
 }
+
+func (u *ServiceUseCase) UnregisterClientFromDistributor(ctx context.Context, client string) error {
+	if err := u.distributor.UnregisterClient(ctx, client); err != nil {
+		return fmt.Errorf("failed to unregister the client from the distributor: %w", err)
+	}
+
+	return nil
+}

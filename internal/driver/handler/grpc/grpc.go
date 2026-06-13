@@ -19,6 +19,7 @@ func NewServer(ctx context.Context, uc *usecase.ServiceUseCase, sc cache.Snapsho
 		uc:            *uc,
 		snapshotCache: sc,
 		logger:        logger,
+		streamKeys:    make(map[int64]string),
 	})
 
 	grpcServer := grpc.NewServer()

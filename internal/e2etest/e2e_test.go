@@ -624,30 +624,37 @@ func TestE2E_MultiStreamSameNodeID(t *testing.T) {
 		respCh <- recvResult{resp: resp, err: err}
 	}()
 
+	// Expected successful end state: stream A's tracked watch is never
+	// dispatched into and the read times out. This is the post-fix state
+	// produced by per-stream cache key disambiguation: stream B's
+	// `SetSnapshot` lands on a different cache entry from stream A's
+	// tracked watch, so stream A is never touched.
+	//
+	// Any response received here means the cache dispatched into stream
+	// A's watch from stream B's distribution, which is the bug — even if
+	// the response happens to contain every listener stream A subscribed
+	// to (which would happen under a subscription-union fix), because the
+	// control plane has chosen the per-stream-key path.
 	select {
 	case got := <-respCh:
 		if got.err != nil {
 			t.Fatalf("stream A second LDS recv: %s", got.err)
 		}
 		names := listenerNamesFromAny(t, got.resp.GetResources())
-		if !slices.Contains(names, "origin-service-1") || !slices.Contains(names, "origin-service-2") {
-			t.Errorf("multi-stream collision triggered phantom resource removal: "+
-				"stream A subscribed to %v over an ADS stream with node.id=%q; "+
-				"stream B then subscribed to %v over a second ADS stream with the SAME node.id; "+
-				"stream A subsequently received a SotW LDS DiscoveryResponse that drops one of its subscribed listeners: "+
-				"got %d resource(s) %v at version=%q. "+
-				"On a real grpc-go client this surfaces as `xds: resource %q of type \"ListenerResource\" has been removed`, "+
-				"the xDS resolver pushes an erroring config selector, the channel goes to TRANSIENT_FAILURE, and the next RPC fails.",
-				[]string{"origin-service-1", "origin-service-2"},
-				nodeID,
-				[]string{"origin-service-1"},
-				len(got.resp.GetResources()), names, got.resp.GetVersionInfo(),
-				"origin-service-2")
-		}
+		t.Errorf("multi-stream collision: stream A's tracked LDS watch was dispatched into from stream B's distribution. "+
+			"stream A subscribed to %v over an ADS stream with node.id=%q; "+
+			"stream B then subscribed to %v over a second ADS stream with the SAME node.id; "+
+			"stream A subsequently received a SotW LDS DiscoveryResponse: got %d resource(s) %v at version=%q. "+
+			"Per-stream-key disambiguation expects stream A's watch to remain silent because stream B's SetSnapshot should land on a different cache entry; "+
+			"a phantom resource removal (response missing one of stream A's subscribed listeners) on a real grpc-go client surfaces as `xds: resource ... has been removed`, "+
+			"pushes an erroring config selector through the xDS resolver, transitions the channel to TRANSIENT_FAILURE, and fails the next RPC.",
+			[]string{"origin-service-1", "origin-service-2"},
+			nodeID,
+			[]string{"origin-service-1"},
+			len(got.resp.GetResources()), names, got.resp.GetVersionInfo())
 	case <-time.After(3 * time.Second):
-		// Once subscriptions across streams under the same node.id are
-		// disambiguated, the cache no longer dispatches into stream A from
-		// stream B's distribution, so this timeout is the expected outcome.
+		// Stream A's tracked watch was not dispatched into. The absence
+		// of a response IS the assertion.
 	}
 }
 

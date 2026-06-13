@@ -150,6 +150,26 @@ func (d *ServiceDistributor) RegisterClustersToClient(ctx context.Context, clien
 	return nil
 }
 
+// UnregisterClient drops the client's listener and cluster subscriptions and
+// clears the SnapshotCache entry stored under the client key. The intended
+// caller is the gRPC server's OnStreamClosed callback: when an ADS stream
+// closes, the per-stream client key it owned becomes garbage and must be
+// removed so that the periodic DistributeServices broadcast no longer
+// republishes a snapshot for a dead stream.
+func (d *ServiceDistributor) UnregisterClient(ctx context.Context, client string) error {
+	d.clientListenersMu.Lock()
+	delete(d.clientListenersMu.clientRequestedListeners, client)
+	d.clientListenersMu.Unlock()
+
+	d.clientClustersMu.Lock()
+	delete(d.clientClustersMu.clientRequestedClusters, client)
+	d.clientClustersMu.Unlock()
+
+	d.snapshotCache.ClearSnapshot(client)
+
+	return nil
+}
+
 func generateListeners(services []*entity.Service, requestedNames []string) ([]types.Resource, string, error) {
 	if len(services) == 0 {
 		return []types.Resource{}, "", nil

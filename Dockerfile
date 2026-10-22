@@ -1,5 +1,5 @@
 # golang:1.27.3-trixie
-FROM golang@sha256:fbb7ae40b62ff8afe31662df570d39b4f5052ac32b90dae8e60d7657a20a74f4 AS builder
+FROM --platform=$BUILDPLATFORM golang@sha256:fbb7ae40b62ff8afe31662df570d39b4f5052ac32b90dae8e60d7657a20a74f4 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH

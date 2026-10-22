@@ -1,4 +1,4 @@
-FROM golang:1.25.6-trixie AS builder
+FROM golang:1.27.3-trixie AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 go build \
 
 ## Runtime
 
-FROM gcr.io/distroless/base@sha256:df13a91fd415eb192a75e2ef7eacf3bb5877bb05ce93064b91b83feef5431f37
+FROM gcr.io/distroless/base@sha256:44a80dc28b49f47396e72ab2dc644b3f849880335de09625762faed207bb891d
 COPY --from=builder /usr/bin/cloud-run-service-router-xds /usr/bin/cloud-run-service-router-xds
 
 CMD ["/usr/bin/cloud-run-service-router-xds"]

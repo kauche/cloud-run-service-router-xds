@@ -1,6 +1,6 @@
 module github.com/kauche/cloud-run-service-router-xds
 
-go 1.25.6
+go 1.27.3
 
 require (
 	cloud.google.com/go/run v1.14.0
